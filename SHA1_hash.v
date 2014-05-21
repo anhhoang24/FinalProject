@@ -48,6 +48,21 @@ output  port_A_we;
 
 output	done; // done is a signal to indicate that hash  is complete
 
+parameter IDLE = 2'b00;
+parameter READ = 2'b01;
+parameter WRITE = 2'b10;
+parameter COMPUTE = 2'b11;
+
+
+always@(posedge clk or negedge nreset)
+begin
+	if(!nreset) begin
+		//reset all registers
+	end
+
+
+end
+
 
 
 endmodule
