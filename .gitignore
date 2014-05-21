@@ -1,0 +1,11 @@
+FinalProject.qpf
+db/
+*.qsf
+*.v.bak
+incremental_db/
+output_files/
+simulation/
+*.swp
+*.bmp
+*.rpt
+*.txt
