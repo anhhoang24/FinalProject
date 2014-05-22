@@ -59,15 +59,18 @@ parameter READ = 2'b01;
 parameter WRITE = 2'b10;
 parameter COMPUTE = 2'b11;
 
-reg [159:0] 	read_hash_data;
-reg [15:0]		read_addr;
-reg [2:0]		words_read;
-reg [1:0]		state;
-reg				wen;
+integer i;
 
-wire [159:0]	read_hash_data_n;
+reg [511:0] 	read_hash_data;
+reg [31:0]		MD[0:4];
+reg [15:0]		read_addr;
+reg [3:0]		words_read;
+reg [1:0]		state;
+reg				wen, init_read;
+
+wire [511:0]	read_hash_data_n;
 wire [15:0]		read_addr_n;
-wire [2:0]		words_read_n;
+wire [3:0]		words_read_n;
 
 
 
@@ -76,11 +79,12 @@ wire [2:0]		words_read_n;
 
 //READ
 assign words_read_n = words_read + 1;
+assign read_addr_n = read_addr + 4; //increment the read address
 
 //READ/WRITE
 assign port_A_addr = read_addr;
 assign port_A_clk = clk;
-assign read_hash_data_n = {read_hash_data[127:0],  changeEndian(port_A_data_out)}; //shift in data
+assign read_hash_data_n = {read_hash_data[479:0],  changeEndian(port_A_data_out)}; //shift in data
 
 //WRITE
 assign port_A_we = wen;
@@ -94,7 +98,11 @@ begin
 		wen <= 1'b0;
 		state <=	IDLE;
 		words_read <= 3'b0;
-		read_hash_data <= 160'b0;
+		read_hash_data <= 512'b0;
+		for(i = 0; i < 5; i = 1 + i) begin
+			MD[i] <= 32'b0;
+		end
+		init_read <= 1'b0;
 	end
 	else begin
 		case(state)
@@ -104,15 +112,27 @@ begin
 					read_addr <= message_addr[15:0];
 					state <= READ;
 					words_read <= 3'b0;
-					read_hash_data <= 160'b0;
+					read_hash_data <= 512'b0;
+					init_read <= 1'b1;
+					
+					//initialize to M values:
+					MD[0] <= 32'h67452301;
+					MD[1] <= 32'hefcdab89;
+					MD[2] <= 32'h98badcfe;
+					MD[3] <= 32'h10325476;
+					MD[4] <= 32'hc3d2e1f0;
+					
 				end
 			end
 			
 			READ: begin
 				read_addr <= read_addr_n;
-				//TODO: I think I am reading the data wrong. should be 512 instead of 160
-				read_hash_data <= read_hash_data_n;
-				words_read <= 3'b0;
+				if(!init_read) begin
+					read_hash_data <= read_hash_data_n;
+					words_read <= words_read_n;
+					state <= (words_read_n) ? READ : COMPUTE; //check if we have filled the buffer
+				end
+				else init_read <= 1'b0;
 			end
 			
 			WRITE: begin
@@ -121,7 +141,7 @@ begin
 			end
 			
 			COMPUTE: begin
-			
+				state <= IDLE; //test
 			
 			end
 		
