@@ -62,20 +62,27 @@ parameter COMPUTE = 2'b11;
 integer i;
 
 reg [511:0] 	read_hash_data;
-reg [31:0]		MD[0:4];
+reg [31:0]		MD[0:4], current_length, byte_n;
 reg [15:0]		read_addr;
 reg [3:0]		words_read;
 reg [1:0]		state;
 reg				wen, init_read;
 
 wire [511:0]	read_hash_data_n;
+wire [31:0]		byte_read_n, total_length;
 wire [15:0]		read_addr_n;
+wire [9:0]		zero_pad_length;
 wire [3:0]		words_read_n;
 
 
 
 
 /////////ASSIGNMENTS//////////////
+
+//INIT 
+assign zero_pad_length = 512 - (((8 * message_size) + 65) % 512);
+	//size of message + 1 + number of zeros + size of size encoding.
+assign total_length = (message_size * 8) + 1 + zero_pad_length + 64;
 
 //READ
 assign words_read_n = words_read + 1;
@@ -84,13 +91,44 @@ assign read_addr_n = read_addr + 4; //increment the read address
 //READ/WRITE
 assign port_A_addr = read_addr;
 assign port_A_clk = clk;
-assign read_hash_data_n = {read_hash_data[479:0],  changeEndian(port_A_data_out)}; //shift in data
+assign byte_read_n = changeEndian(port_A_data_out);
+assign read_hash_data_n = {read_hash_data[479:0],  byte_n}; //shift in data
+assign done = (current_length == total_length) && (state == IDLE);
 
 //WRITE
 assign port_A_we = wen;
 
 
 
+always@(*)
+begin
+	//check which part of the buffer we want to add:
+	if(current_length == total_length) begin
+	byte_n <= {32'b0, message_size};
+	end
+	//single bit pad:
+	else if((current_length - message_size) < 4) begin
+		case(message_size % 4)
+		0: byte_n <= 32'h80000000;
+		1: byte_n <= byte_read_n & 32'hFF000000 | 32'h00800000;
+		2: byte_n <= byte_read_n & 32'hFFFF0000 | 32'h00008000;
+		3: byte_n <= byte_read_n & 32'hFFFFFF00 | 32'h00000080;
+		endcase
+	end
+	// zero bit pads:
+	else if(current_length > message_size) begin
+		byte_n <= 32'h00000000;
+	end
+	//not doing padding, doing reads:
+	else begin
+		byte_n <= byte_read_n;
+	end
+end
+
+
+
+
+//main logic:
 always@(posedge clk or negedge nreset)
 begin
 	if(!nreset) begin
@@ -99,6 +137,7 @@ begin
 		state <=	IDLE;
 		words_read <= 3'b0;
 		read_hash_data <= 512'b0;
+		current_length <= 32'b0;
 		for(i = 0; i < 5; i = 1 + i) begin
 			MD[i] <= 32'b0;
 		end
@@ -121,7 +160,9 @@ begin
 					MD[2] <= 32'h98badcfe;
 					MD[3] <= 32'h10325476;
 					MD[4] <= 32'hc3d2e1f0;
-					
+				end
+				if(wen) begin
+					wen <= 1'b0;
 				end
 			end
 			
@@ -131,6 +172,7 @@ begin
 					read_hash_data <= read_hash_data_n;
 					words_read <= words_read_n;
 					state <= (words_read_n) ? READ : COMPUTE; //check if we have filled the buffer
+					current_length <= current_length + 4; // keep running count of current length
 				end
 				else init_read <= 1'b0;
 			end
@@ -141,8 +183,7 @@ begin
 			end
 			
 			COMPUTE: begin
-				state <= IDLE; //test
-			
+				state <= (current_length == total_length)? IDLE : READ; //test
 			end
 		
 		endcase
