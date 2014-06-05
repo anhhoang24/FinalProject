@@ -61,7 +61,7 @@ parameter COMPUTE = 2'b11;
 
 integer i;
 
-reg [31:0]		runMD[0:4], currMD[0:4], current_length, word_n, W_t, read_hash_data[15:0], K_t, F_b_c_d, T;
+reg [31:0]		runMD[0:4], currMD[0:4], current_length, word_n, W[0:79], read_hash_data[15:0], K_t, F_b_c_d, T;
 reg [15:0]		read_addr;
 reg [6:0]		count_t;
 reg [3:0]		words_read;
@@ -84,7 +84,7 @@ assign zero_pad_length = 512 - (((8 * message_size) + 65) % 512);
 assign total_length = (message_size * 8) + 1 + zero_pad_length + 64;
 
 //READ
-assign words_read_n = (words_read + 1) % 16;
+assign words_read_n = words_read + 1;
 assign read_addr_n = read_addr + 4; //increment the read address
 
 //READ/WRITE
@@ -104,18 +104,17 @@ assign D = currMD[3];
 assign E = currMD[4];
 
 //OUT
-assign hash = {changeEndian(runMD[4]),changeEndian(runMD[3]),
-						changeEndian(runMD[2]),changeEndian(runMD[1]),changeEndian(runMD[0])};
+assign hash = {runMD[0],runMD[1],runMD[2],runMD[3],runMD[4]};
 
 
 always@(*)
 begin
 	//check which part of the buffer we want to add:
 	if(current_length == total_length-32) begin
-	word_n <= message_size;
+		word_n <= message_size;
 	end
 	//single bit pad:
-	else if((((current_length/8) - message_size) < 4) && current_length >= (message_size*8)) begin
+	else if((current_length/8 - message_size < 4)) begin
 		case(message_size % 4)
 		0: word_n <= 32'h80000000;
 		1: word_n <= word_read_n & 32'hFF000000 | 32'h00800000;
@@ -132,15 +131,14 @@ begin
 		word_n <= word_read_n;
 	end
 	
-	
-	//TODO: bug present here, cannot access the data like this because no element exists for read_hash_data[16 +]
 	//compute current W_t:
 	if(count_t < 16) begin
-		W_t <= read_hash_data[count_t];
+		W[count_t] <= read_hash_data[count_t];
 	end
 	else begin
-		W_t <= (read_hash_data[count_t-3] ^ read_hash_data[count_t-8] ^ 
-					read_hash_data[count_t-14] ^ read_hash_data[count_t-16]) <<< 1;
+		//NOTE: ON THE TB, THIS IS DONE SLIGHTLY DIFFERENT.
+		W[count_t] <= (W[count_t-3] ^ W[count_t-8] ^ 
+					W[count_t-14] ^ W[count_t-16]) <<< 1;
 	end
 	
 	//compute current K_t and F_b_c_d
@@ -162,7 +160,7 @@ begin
 	end
 	
 	//compute value of T
-	T <= (A <<< 5) + F_b_c_d + W_t + K_t + E;
+	T <= (A <<< 5) + F_b_c_d + W[count_t] + K_t + E;
 end
 
 
