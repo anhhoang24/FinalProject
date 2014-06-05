@@ -68,7 +68,7 @@ reg [3:0]		words_read;
 reg [1:0]		state;
 reg				wen, init_read;
 
-wire [31:0]		word_read_n, total_length, A, B, C, D, E;
+wire [31:0]		word_read_n, total_length, A, B, C, D, E, W_t_next_no_shift;
 wire [15:0]		read_addr_n;
 wire [9:0]		zero_pad_length;
 wire [3:0]		words_read_n;
@@ -102,6 +102,7 @@ assign B = currMD[1];
 assign C = currMD[2];
 assign D = currMD[3];
 assign E = currMD[4];
+assign W_t_next_no_shift = (W[count_t+1-3+1] ^ W[count_t+1-8] ^ W[count_t+1-14] ^ W[count_t+1-16]);
 
 //OUT
 assign hash = {runMD[0],runMD[1],runMD[2],runMD[3],runMD[4]};
@@ -111,7 +112,7 @@ always@(*)
 begin
 	//check which part of the buffer we want to add:
 	if(current_length == total_length-32) begin
-		word_n <= message_size;
+		word_n <= (message_size * 8);
 	end
 	//single bit pad:
 	else if((current_length/8 - message_size < 4)) begin
@@ -129,16 +130,6 @@ begin
 	//not doing padding, doing reads:
 	else begin
 		word_n <= word_read_n;
-	end
-	
-	//compute current W_t:
-	if(count_t < 16) begin
-		W[count_t] <= read_hash_data[count_t];
-	end
-	else begin
-		//NOTE: ON THE TB, THIS IS DONE SLIGHTLY DIFFERENT.
-		W[count_t] <= (W[count_t-3] ^ W[count_t-8] ^ 
-					W[count_t-14] ^ W[count_t-16]) <<< 1;
 	end
 	
 	//compute current K_t and F_b_c_d
@@ -160,7 +151,7 @@ begin
 	end
 	
 	//compute value of T
-	T <= (A <<< 5) + F_b_c_d + W[count_t] + K_t + E;
+	T <= ((A << 5) | (A >> 27)) + F_b_c_d + W[count_t] + K_t + E;
 end
 
 
@@ -226,11 +217,12 @@ begin
 					//POTENTIAL HAZARD: this may be either == 15 or == 16
 					if(words_read == 15) begin
 						state <= COMPUTE; //check if we have filled the buffer
-						currMD[0] <= 32'h67452301;
-						currMD[1] <= 32'hefcdab89;
-						currMD[2] <= 32'h98badcfe;
-						currMD[3] <= 32'h10325476;
-						currMD[4] <= 32'hc3d2e1f0;
+						currMD[0] <= runMD[0];
+						currMD[1] <= runMD[1];
+						currMD[2] <= runMD[2];
+						currMD[3] <= runMD[3];
+						currMD[4] <= runMD[4];
+						W[0] <= read_hash_data[0];
 					end
 				end
 				else init_read <= 1'b0;
@@ -243,11 +235,21 @@ begin
 			
 			COMPUTE: begin
 				count_t <= (1 + count_t) % 80; //increment count_t
+				
+				//compute next W_t:
+				if(count_t+1 < 16) begin
+					W[count_t+1] <= read_hash_data[count_t+1];
+				end
+				else begin
+					W[count_t+1] <= (W_t_next_no_shift << 1) | (W_t_next_no_shift >> 31);
+				end
+				
+				
 				if(count_t < 79) begin
 					//Perform Algorithm:
 					currMD[0] <= T;
 					currMD[1] <= A;
-					currMD[2] <= (B <<< 30);
+					currMD[2] <= (B << 30) | (B >> 2);
 					currMD[3] <= C;
 					currMD[4] <= D;
 				end
@@ -255,7 +257,7 @@ begin
 					state <= (current_length == total_length) ? IDLE : READ;
 					runMD[0] <= runMD[0] + T;
 					runMD[1] <= runMD[1] + A;
-					runMD[2] <= runMD[2] + (B <<< 30);
+					runMD[2] <= runMD[2] + ((B << 30) | (B >> 2));
 					runMD[3] <= runMD[3] + C;
 					runMD[4] <= runMD[4] + D;
 				end
