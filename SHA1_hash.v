@@ -222,7 +222,7 @@ begin
 						currMD[2] <= runMD[2];
 						currMD[3] <= runMD[3];
 						currMD[4] <= runMD[4];
-						W[0] <= read_hash_data[0];
+						W[0] <= read_hash_data[1];
 					end
 				end
 				else init_read <= 1'b0;
