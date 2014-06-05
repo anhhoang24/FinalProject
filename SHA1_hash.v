@@ -61,14 +61,14 @@ parameter COMPUTE = 2'b11;
 
 integer i;
 
-reg [31:0]		runMD[0:4], currMD[0:4], current_length, byte_n, W_t, read_hash_data[15:0], K_t, F_b_c_d, T;
+reg [31:0]		runMD[0:4], currMD[0:4], current_length, word_n, W_t, read_hash_data[15:0], K_t, F_b_c_d, T;
 reg [15:0]		read_addr;
 reg [6:0]		count_t;
 reg [3:0]		words_read;
 reg [1:0]		state;
 reg				wen, init_read;
 
-wire [31:0]		byte_read_n, total_length, A, B, C, D, E;
+wire [31:0]		word_read_n, total_length, A, B, C, D, E;
 wire [15:0]		read_addr_n;
 wire [9:0]		zero_pad_length;
 wire [3:0]		words_read_n;
@@ -90,7 +90,7 @@ assign read_addr_n = read_addr + 4; //increment the read address
 //READ/WRITE
 assign port_A_addr = read_addr;
 assign port_A_clk = clk;
-assign byte_read_n = changeEndian(port_A_data_out);
+assign word_read_n = changeEndian(port_A_data_out);
 assign done = (current_length == total_length) && (state == IDLE);
 
 //WRITE
@@ -111,36 +111,36 @@ assign hash = {changeEndian(runMD[4]),changeEndian(runMD[3]),
 always@(*)
 begin
 	//check which part of the buffer we want to add:
-	if(current_length == total_length) begin
-	byte_n <= {32'b0, message_size};
+	if(current_length == total_length-32) begin
+	word_n <= message_size;
 	end
 	//single bit pad:
-	else if((current_length - message_size) < 4) begin
+	else if((((current_length/8) - message_size) < 4) && current_length >= (message_size*8)) begin
 		case(message_size % 4)
-		0: byte_n <= 32'h80000000;
-		1: byte_n <= byte_read_n & 32'hFF000000 | 32'h00800000;
-		2: byte_n <= byte_read_n & 32'hFFFF0000 | 32'h00008000;
-		3: byte_n <= byte_read_n & 32'hFFFFFF00 | 32'h00000080;
+		0: word_n <= 32'h80000000;
+		1: word_n <= word_read_n & 32'hFF000000 | 32'h00800000;
+		2: word_n <= word_read_n & 32'hFFFF0000 | 32'h00008000;
+		3: word_n <= word_read_n & 32'hFFFFFF00 | 32'h00000080;
 		endcase
 	end
 	// zero bit pads:
-	else if(current_length > message_size) begin
-		byte_n <= 32'h00000000;
+	else if(current_length > message_size*8) begin
+		word_n <= 32'h00000000;
 	end
 	//not doing padding, doing reads:
 	else begin
-		byte_n <= byte_read_n;
+		word_n <= word_read_n;
 	end
 	
 	
+	//TODO: bug present here, cannot access the data like this because no element exists for read_hash_data[16 +]
 	//compute current W_t:
 	if(count_t < 16) begin
 		W_t <= read_hash_data[count_t];
 	end
 	else begin
-		W_t <= (read_hash_data[count_t-3] ^ 
-					read_hash_data[count_t-8] ^ read_hash_data[count_t-14] ^ 
-					read_hash_data[count_t-16] ^ read_hash_data[count_t-3]) <<< 1;
+		W_t <= (read_hash_data[count_t-3] ^ read_hash_data[count_t-8] ^ 
+					read_hash_data[count_t-14] ^ read_hash_data[count_t-16]) <<< 1;
 	end
 	
 	//compute current K_t and F_b_c_d
@@ -214,25 +214,26 @@ begin
 			end
 			
 			READ: begin
-				read_addr <= read_addr_n;
+				read_addr <= (words_read > 14) ? read_addr : read_addr_n;
 				if(!init_read) begin
 					
 					//shift data:
-					read_hash_data[15] <= byte_n;
+					read_hash_data[15] <= word_n;
 					for(i = 14; i >= 0; i = i - 1) begin
-						read_hash_data[i] = read_hash_data[i+1];
+						read_hash_data[i] <= read_hash_data[i+1];
 					end
 					words_read <= words_read_n;
+					current_length <= current_length + 32; // keep running count of current length
 					
 					//POTENTIAL HAZARD: this may be either == 15 or == 16
-					if(words_read_n == 15) begin
+					if(words_read == 15) begin
 						state <= COMPUTE; //check if we have filled the buffer
-						for(i = 0; i < 5; i = 1 + i) begin
-							currMD[i] <= runMD[i];
-						end
+						currMD[0] <= 32'h67452301;
+						currMD[1] <= 32'hefcdab89;
+						currMD[2] <= 32'h98badcfe;
+						currMD[3] <= 32'h10325476;
+						currMD[4] <= 32'hc3d2e1f0;
 					end
-					
-					current_length <= current_length + 4; // keep running count of current length
 				end
 				else init_read <= 1'b0;
 			end
