@@ -79,6 +79,7 @@ wire [3:0]		words_read_n;
 /////////ASSIGNMENTS//////////////
 
 //INIT 
+//NOTE: I think zero_pad_length is 1 more if this mod is not zero
 assign zero_pad_length = 512 - (((8 * message_size) + 65) % 512);
 	//size of message + 1 + number of zeros + size of size encoding.
 assign total_length = (message_size * 8) + 1 + zero_pad_length + 64;
@@ -102,7 +103,7 @@ assign B = currMD[1];
 assign C = currMD[2];
 assign D = currMD[3];
 assign E = currMD[4];
-assign W_t_next_no_shift = (W[count_t+1-3+1] ^ W[count_t+1-8] ^ W[count_t+1-14] ^ W[count_t+1-16]);
+assign W_t_next_no_shift = (W[count_t+1-3] ^ W[count_t+1-8] ^ W[count_t+1-14] ^ W[count_t+1-16]);
 
 //OUT
 assign hash = {runMD[0],runMD[1],runMD[2],runMD[3],runMD[4]};
@@ -115,7 +116,7 @@ begin
 		word_n <= (message_size * 8);
 	end
 	//single bit pad:
-	else if((current_length/8 - message_size < 4)) begin
+	else if(((current_length)/8 - message_size < 4)) begin
 		case(message_size % 4)
 		0: word_n <= 32'h80000000;
 		1: word_n <= word_read_n & 32'hFF000000 | 32'h00800000;
@@ -235,7 +236,6 @@ begin
 			
 			COMPUTE: begin
 				count_t <= (1 + count_t) % 80; //increment count_t
-				
 				//compute next W_t:
 				if(count_t+1 < 16) begin
 					W[count_t+1] <= read_hash_data[count_t+1];
@@ -255,6 +255,7 @@ begin
 				end
 				else if(count_t == 79) begin
 					state <= (current_length == total_length) ? IDLE : READ;
+					read_addr <= read_addr_n; //get read address for cylce after next cycle:
 					runMD[0] <= runMD[0] + T;
 					runMD[1] <= runMD[1] + A;
 					runMD[2] <= runMD[2] + ((B << 30) | (B >> 2));
