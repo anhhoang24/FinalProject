@@ -137,6 +137,7 @@ begin
     2: dpsram_test[message_length/4] = dpsram_test[message_length/4] & 32'h FFFF0000 | 32'h 00008000;
     3: dpsram_test[message_length/4] = dpsram_test[message_length/4] & 32'h FFFFFF00 | 32'h 00000080;
     endcase
+	$display("Last one at %x: %x",(message_length/4),dpsram_test[message_length/4]);
 
     for (k = message_length/4+1; k < pad_length/4; k = k + 1) begin
         dpsram_test[k] = 32'h00000000;

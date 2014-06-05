@@ -149,6 +149,7 @@ begin
     outloop = pad_length/64; // break message into 512-bit chunks (64 bytes)
 
     for (k = 0; k < outloop; k = k + 1) begin
+	$display("Start\n");
         for (j = 0; j < 16; j = j + 1) begin
             w_tb[j] = dpsram_test[j+k*16];
         end
@@ -178,6 +179,7 @@ begin
                 f_tb = b_tb ^ c_tb ^ d_tb;
                 k_tb = 32'hCA62C1D6;
             end
+	    $display("F: %x, W: %x\n",f_tb, w_tb[i]);
 
             temp_tb = ((a_tb << 5)|(a_tb >> 27)) + f_tb + e_tb + k_tb + w_tb[i];
             e_tb = d_tb;
@@ -192,6 +194,7 @@ begin
         h2_tb = h2_tb + c_tb;
         h3_tb = h3_tb + d_tb;
         h4_tb = h4_tb + e_tb;
+	$display("%x\n", { h0_tb, h1_tb, h2_tb, h3_tb, h4_tb });
     end
 
     digest_tb = { h0_tb, h1_tb, h2_tb, h3_tb, h4_tb };

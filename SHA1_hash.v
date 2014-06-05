@@ -116,7 +116,7 @@ begin
 		word_n <= (message_size * 8);
 	end
 	//single bit pad:
-	else if(((current_length)/8 - message_size < 4)) begin
+	else if((message_size - (current_length)/8 < 4)) begin
 		case(message_size % 4)
 		0: word_n <= 32'h80000000;
 		1: word_n <= word_read_n & 32'hFF000000 | 32'h00800000;
