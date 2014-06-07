@@ -1,4 +1,4 @@
-module SHA1_hash (       
+module SHA1_hash_fast (       
 	clk, 		
 	nreset, 	
 	start_hash,  
@@ -54,24 +54,20 @@ output  port_A_we;
 
 output	done; // done is a signal to indicate that hash  is complete
 
-parameter IDLE = 2'b00;
-parameter READ = 2'b01;
-parameter WRITE = 2'b10;
-parameter COMPUTE = 2'b11;
+parameter IDLE = 1'b0;
+parameter COMPUTE = 1'b1;
 
 integer i;
 
-reg [31:0]		runMD[0:4], currMD[0:4], current_length, word_n, W[0:79], read_hash_data[15:0], K_t, F_b_c_d, T;
+reg [31:0]		runMD[0:4], currMD[0:4], current_length, word_n, W[0:79], K_t, F_b_c_d, T;
 reg [15:0]		read_addr;
 reg [6:0]		count_t;
-reg [3:0]		words_read;
-reg [1:0]		state;
-reg				wen, init_read;
+reg [1:0]		init_read;
+reg				wen, state;
 
 wire [31:0]		word_read_n, total_length, A, B, C, D, E, W_t_next_no_shift;
 wire [15:0]		read_addr_n;
 wire [9:0]		zero_pad_length;
-wire [3:0]		words_read_n;
 
 
 
@@ -85,8 +81,7 @@ assign zero_pad_length = 512 - (((8 * message_size) + 65) % 512);
 assign total_length = (message_size * 8) + 1 + zero_pad_length + 64;
 
 //READ
-assign words_read_n = words_read + 1;
-assign read_addr_n = read_addr + 4; //increment the read address
+assign read_addr_n = ((count_t > 14) & (count_t < 78)) ? read_addr : read_addr + 4;
 
 //READ/WRITE
 assign port_A_addr = read_addr;
@@ -116,7 +111,7 @@ begin
 		word_n <= (message_size * 8);
 	end
 	//single bit pad:
-	else if((message_size - (current_length)/8 < 4)) begin
+	else if((message_size - (current_length+32)/8 < 4)) begin
 		case(message_size % 4)
 		0: word_n <= 32'h80000000;
 		1: word_n <= word_read_n & 32'hFF000000 | 32'h00800000;
@@ -125,7 +120,7 @@ begin
 		endcase
 	end
 	// zero bit pads:
-	else if(current_length > message_size*8) begin
+	else if(current_length+32 > message_size*8) begin
 		word_n <= 32'h00000000;
 	end
 	//not doing padding, doing reads:
@@ -165,18 +160,13 @@ begin
 		//reset all registers
 		wen <= 1'b0;
 		state <=	IDLE;
-		words_read <= 3'b0;
 		current_length <= 32'b0;
 		count_t <= 7'b0;
 		for(i = 0; i < 5; i = 1 + i) begin
 			currMD[i] <= 32'b0;
 			runMD[i] <= 32'b0;
 		end
-		for(i = 0; i < 16; i = 1 + i) begin
-			read_hash_data[i] <= 32'b0;
-		end
-		
-		init_read <= 1'b0;
+		init_read <= 2'b0;
 	end
 	else begin
 		case(state)
@@ -184,12 +174,9 @@ begin
 			IDLE: begin
 				if(start_hash) begin
 					read_addr <= message_addr[15:0];
-					state <= READ;
-					words_read <= 3'b0;
-					for(i = 0; i < 16; i = 1 + i) begin
-						read_hash_data[i] <= 32'b0;
-					end
-					init_read <= 1'b1;
+					state <= COMPUTE;
+					init_read <= 2'b10;
+					current_length <= 32'b0;
 					
 					//initialize to M values:
 					runMD[0] <= 32'h67452301;
@@ -197,13 +184,20 @@ begin
 					runMD[2] <= 32'h98badcfe;
 					runMD[3] <= 32'h10325476;
 					runMD[4] <= 32'hc3d2e1f0;
+					
+					currMD[0] <= 32'h67452301;
+					currMD[1] <= 32'hefcdab89;
+					currMD[2] <= 32'h98badcfe;
+					currMD[3] <= 32'h10325476;
+					currMD[4] <= 32'hc3d2e1f0;
 				end
 				if(wen) begin
 					wen <= 1'b0;
 				end
 			end
 			
-			READ: begin
+			/*
+			FIRST_READ: begin
 				read_addr <= (words_read > 14) ? read_addr : read_addr_n;
 				if(!init_read) begin
 					
@@ -227,40 +221,51 @@ begin
 					end
 				end
 				else init_read <= 1'b0;
-			end
-			
-			WRITE: begin
-			
-			
-			end
+			end*/
 			
 			COMPUTE: begin
-				count_t <= (1 + count_t) % 80; //increment count_t
-				//compute next W_t:
-				if(count_t+1 < 16) begin
-					W[count_t+1] <= read_hash_data[count_t+1];
+				read_addr <= read_addr_n;
+				if(!init_read) begin
+					///////////COMPUTE:
+					count_t <= (1 + count_t) % 80; //increment count_t
+					//compute next W_t:
+					if(count_t+1 < 16) begin
+						//reads:
+						W[count_t+1] <= word_n;
+						current_length <= current_length + 32;
+					end
+					else begin
+						W[count_t+1] <= (W_t_next_no_shift << 1) | (W_t_next_no_shift >> 31);
+					end
+
+					if(count_t < 79) begin
+						//Perform Algorithm:
+						currMD[0] <= T;
+						currMD[1] <= A;
+						currMD[2] <= (B << 30) | (B >> 2);
+						currMD[3] <= C;
+						currMD[4] <= D;
+					end
+					else if(count_t == 79) begin
+						state <= (current_length+32 == total_length) ? IDLE : COMPUTE;
+						runMD[0] <= runMD[0] + T;
+						runMD[1] <= runMD[1] + A;
+						runMD[2] <= runMD[2] + ((B << 30) | (B >> 2));
+						runMD[3] <= runMD[3] + C;
+						runMD[4] <= runMD[4] + D;
+						
+						currMD[0] <= runMD[0] + T;
+						currMD[1] <= runMD[1] + A;
+						currMD[2] <= runMD[2] + ((B << 30) | (B >> 2));
+						currMD[3] <= runMD[3] + C;
+						currMD[4] <= runMD[4] + D;
+						
+						W[0] <= word_n;
+					end
 				end
 				else begin
-					W[count_t+1] <= (W_t_next_no_shift << 1) | (W_t_next_no_shift >> 31);
-				end
-				
-				
-				if(count_t < 79) begin
-					//Perform Algorithm:
-					currMD[0] <= T;
-					currMD[1] <= A;
-					currMD[2] <= (B << 30) | (B >> 2);
-					currMD[3] <= C;
-					currMD[4] <= D;
-				end
-				else if(count_t == 79) begin
-					state <= (current_length == total_length) ? IDLE : READ;
-					read_addr <= read_addr_n; //get read address for cylce after next cycle:
-					runMD[0] <= runMD[0] + T;
-					runMD[1] <= runMD[1] + A;
-					runMD[2] <= runMD[2] + ((B << 30) | (B >> 2));
-					runMD[3] <= runMD[3] + C;
-					runMD[4] <= runMD[4] + D;
+					init_read <= init_read - 1;
+					W[0] <= word_n;
 				end
 			end
 		
