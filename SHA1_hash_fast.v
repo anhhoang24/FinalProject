@@ -59,16 +59,17 @@ parameter COMPUTE = 1'b1;
 
 integer i;
 
-reg [31:0]		runMD[0:4], currMD[0:4], current_length, word_n, W[0:79], K_t, F_b_c_d, T;
+reg [31:0]		runMD[0:4], currMD[0:4], current_length, word_n, W[0:15], K_t, F_b_c_d, T;
 reg [15:0]		read_addr;
 reg [6:0]		count_t;
 reg [1:0]		init_read;
 reg				state;
 
-wire [31:0]		word_read_n, total_length, A, B, C, D, E, W_t_next_no_shift;
+wire [31:0]		word_read_n, total_length, A, B, C, D, E, W_t_next_no_shift, current_length_n, message_size_bit_s;
 wire [31:0]		A_n, B_n, C_n, D_n, E_n, A_plus, B_plus, C_plus, D_plus, E_plus, BxCxD, BandC;
 wire [15:0]		read_addr_n;
 wire [9:0]		zero_pad_length;
+wire [6:0]		count_t_n, count_t_n_mod;
 wire				stop_read;
 
 
@@ -78,19 +79,24 @@ wire				stop_read;
 
 //INIT 
 //NOTE: I think zero_pad_length is 1 more if this mod is not zero
-assign zero_pad_length = 512 - (((8 * message_size) + 65) % 512);
+assign zero_pad_length = 512 - ((message_size_bit_s + 65) % 512);
 	//size of message + 1 + number of zeros + size of size encoding.
-assign total_length = (message_size * 8) + 1 + zero_pad_length + 64;
+assign total_length = message_size_bit_s + 1 + zero_pad_length + 64;
 
 //READ
 assign read_addr_n = ((count_t > 13) & (count_t < 78) | stop_read) ? read_addr : read_addr + 4;
-assign stop_read = (current_length == (message_size *8));
+assign stop_read = (current_length == message_size_bit_s);
 assign port_A_addr = read_addr;
 assign port_A_clk = clk;
 assign word_read_n = changeEndian(port_A_data_out);
-assign done = (current_length-32 == total_length) && (state == IDLE);
 
 //COMPUTE:
+assign done = (current_length-32 == total_length) && (state == IDLE);
+assign current_length_n = current_length + 32;
+assign count_t_n = count_t + 1;
+assign count_t_n_mod = count_t_n % 16;
+assign message_size_bit_s = message_size * 8;
+
 assign A = currMD[0];
 assign B = currMD[1];
 assign C = currMD[2];
@@ -112,7 +118,7 @@ assign E_plus = runMD[4] + E_n;
 assign BxCxD = B ^ C ^ D;
 assign BandC = B & C;
 
-assign W_t_next_no_shift = (W[count_t+1-3] ^ W[count_t+1-8] ^ W[count_t+1-14] ^ W[count_t+1-16]);
+assign W_t_next_no_shift = (W[(count_t-2) % 16] ^ W[(count_t-7) % 16] ^ W[(count_t-13) % 16] ^ W[(count_t-15) % 16]);
 
 //OUT
 assign hash = {runMD[0],runMD[1],runMD[2],runMD[3],runMD[4]};
@@ -121,8 +127,8 @@ assign hash = {runMD[0],runMD[1],runMD[2],runMD[3],runMD[4]};
 always@(*)
 begin
 	//check which part of the buffer we want to add:
-	if(current_length+32 == total_length) begin
-		word_n <= (message_size * 8);
+	if(current_length_n == total_length) begin
+		word_n <= message_size_bit_s;
 	end
 	//single bit pad:
 	else if((message_size - (current_length)/8 < 4)) begin
@@ -134,7 +140,7 @@ begin
 		endcase
 	end
 	// zero bit pads:
-	else if(current_length > message_size*8) begin
+	else if(current_length > message_size_bit_s) begin
 		word_n <= 32'h00000000;
 	end
 	//not doing padding, doing reads:
@@ -161,7 +167,7 @@ begin
 	end
 	
 	//compute value of T
-	T <= ((A << 5) | (A >> 27)) + F_b_c_d + W[count_t] + K_t + E;
+	T <= ((A << 5) | (A >> 27)) + F_b_c_d + W[count_t % 16] + K_t + E;
 end
 
 
@@ -205,47 +211,18 @@ begin
 					currMD[4] <= 32'hc3d2e1f0;
 				end
 			end
-			
-			/*
-			FIRST_READ: begin
-				read_addr <= (words_read > 14) ? read_addr : read_addr_n;
-				if(!init_read) begin
-					
-					//shift data:
-					read_hash_data[15] <= word_n;
-					for(i = 14; i >= 0; i = i - 1) begin
-						read_hash_data[i] <= read_hash_data[i+1];
-					end
-					words_read <= words_read_n;
-					current_length <= current_length + 32; // keep running count of current length
-					
-					//POTENTIAL HAZARD: this may be either == 15 or == 16
-					if(words_read == 15) begin
-						state <= COMPUTE; //check if we have filled the buffer
-						currMD[0] <= runMD[0];
-						currMD[1] <= runMD[1];
-						currMD[2] <= runMD[2];
-						currMD[3] <= runMD[3];
-						currMD[4] <= runMD[4];
-						W[0] <= read_hash_data[1];
-					end
-				end
-				else init_read <= 1'b0;
-			end*/
-			
 			COMPUTE: begin
 				read_addr <= read_addr_n;
 				if(!init_read) begin
-					///////////COMPUTE:
-					count_t <= (1 + count_t) % 80; //increment count_t
+					count_t <= (count_t_n) % 80; //increment count_t
 					//compute next W_t:
-					if(count_t+1 < 16) begin
+					if(count_t_n < 16) begin
 						//reads:
-						W[count_t+1] <= word_n;
-						current_length <= current_length + 32;
+						W[count_t_n_mod] <= word_n;
+						current_length <= current_length_n;
 					end
 					else begin
-						W[count_t+1] <= (W_t_next_no_shift << 1) | (W_t_next_no_shift >> 31);
+						W[count_t_n_mod] <= (W_t_next_no_shift << 1) | (W_t_next_no_shift >> 31);
 					end
 
 					if(count_t < 79) begin
@@ -269,15 +246,15 @@ begin
 						currMD[2] <= C_plus;
 						currMD[3] <= D_plus;
 						currMD[4] <= E_plus;
-						current_length <= current_length + 32;
+						current_length <= current_length_n;
 						W[0] <= word_n;
 					end
 				end
 				else begin
 					init_read <= init_read - 1;
-					if(init_read  == 2'b01) begin
+					if(init_read == 2'b01) begin
 						W[0] <= word_n;
-						current_length <= current_length + 32;
+						current_length <= current_length_n;
 					end
 				end
 			end
