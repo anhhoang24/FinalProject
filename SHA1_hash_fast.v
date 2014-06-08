@@ -109,11 +109,11 @@ assign hash = {runMD[0],runMD[1],runMD[2],runMD[3],runMD[4]};
 always@(*)
 begin
 	//check which part of the buffer we want to add:
-	if(current_length == total_length-128) begin
+	if(current_length+32 == total_length) begin
 		word_n <= (message_size * 8);
 	end
 	//single bit pad:
-	else if((message_size - (current_length+64)/8 < 4)) begin
+	else if((message_size - (current_length)/8 < 4)) begin
 		case(message_size % 4)
 		0: word_n <= 32'h80000000;
 		1: word_n <= word_read_n & 32'hFF000000 | 32'h00800000;
@@ -122,7 +122,7 @@ begin
 		endcase
 	end
 	// zero bit pads:
-	else if(current_length+64 > message_size*8) begin
+	else if(current_length > message_size*8) begin
 		word_n <= 32'h00000000;
 	end
 	//not doing padding, doing reads:
@@ -249,7 +249,7 @@ begin
 						currMD[4] <= D;
 					end
 					else if(count_t == 79) begin
-						state <= (current_length+32 == total_length) ? IDLE : COMPUTE;
+						state <= (current_length == total_length) ? IDLE : COMPUTE;
 						runMD[0] <= runMD[0] + T;
 						runMD[1] <= runMD[1] + A;
 						runMD[2] <= runMD[2] + ((B << 30) | (B >> 2));
@@ -261,13 +261,16 @@ begin
 						currMD[2] <= runMD[2] + ((B << 30) | (B >> 2));
 						currMD[3] <= runMD[3] + C;
 						currMD[4] <= runMD[4] + D;
-						
+						current_length <= current_length + 32;
 						W[0] <= word_n;
 					end
 				end
 				else begin
 					init_read <= init_read - 1;
-					W[0] <= word_n;
+					if(init_read  == 2'b01) begin
+						W[0] <= word_n;
+						current_length <= current_length + 32;
+					end
 				end
 			end
 		
