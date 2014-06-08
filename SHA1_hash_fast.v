@@ -68,6 +68,7 @@ reg				wen, state;
 wire [31:0]		word_read_n, total_length, A, B, C, D, E, W_t_next_no_shift;
 wire [15:0]		read_addr_n;
 wire [9:0]		zero_pad_length;
+wire				stop_read;
 
 
 
@@ -81,7 +82,8 @@ assign zero_pad_length = 512 - (((8 * message_size) + 65) % 512);
 assign total_length = (message_size * 8) + 1 + zero_pad_length + 64;
 
 //READ
-assign read_addr_n = ((count_t > 14) & (count_t < 78)) ? read_addr : read_addr + 4;
+assign read_addr_n = ((count_t > 13) & (count_t < 78) | stop_read) ? read_addr : read_addr + 4;
+assign stop_read = (current_length == (message_size *8));
 
 //READ/WRITE
 assign port_A_addr = read_addr;
@@ -107,11 +109,11 @@ assign hash = {runMD[0],runMD[1],runMD[2],runMD[3],runMD[4]};
 always@(*)
 begin
 	//check which part of the buffer we want to add:
-	if(current_length == total_length-32) begin
+	if(current_length == total_length-128) begin
 		word_n <= (message_size * 8);
 	end
 	//single bit pad:
-	else if((message_size - (current_length+32)/8 < 4)) begin
+	else if((message_size - (current_length+64)/8 < 4)) begin
 		case(message_size % 4)
 		0: word_n <= 32'h80000000;
 		1: word_n <= word_read_n & 32'hFF000000 | 32'h00800000;
@@ -120,7 +122,7 @@ begin
 		endcase
 	end
 	// zero bit pads:
-	else if(current_length+32 > message_size*8) begin
+	else if(current_length+64 > message_size*8) begin
 		word_n <= 32'h00000000;
 	end
 	//not doing padding, doing reads:
