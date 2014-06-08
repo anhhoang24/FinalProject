@@ -89,7 +89,7 @@ assign stop_read = (current_length == (message_size *8));
 assign port_A_addr = read_addr;
 assign port_A_clk = clk;
 assign word_read_n = changeEndian(port_A_data_out);
-assign done = (current_length == total_length) && (state == IDLE);
+assign done = (current_length-32 == total_length) && (state == IDLE);
 
 //WRITE
 assign port_A_we = wen;
