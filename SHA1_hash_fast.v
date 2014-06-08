@@ -63,9 +63,10 @@ reg [31:0]		runMD[0:4], currMD[0:4], current_length, word_n, W[0:79], K_t, F_b_c
 reg [15:0]		read_addr;
 reg [6:0]		count_t;
 reg [1:0]		init_read;
-reg				wen, state;
+reg				state;
 
 wire [31:0]		word_read_n, total_length, A, B, C, D, E, W_t_next_no_shift;
+wire [31:0]		A_n, B_n, C_n, D_n, E_n, A_plus, B_plus, C_plus, D_plus, E_plus, BxCxD, BandC;
 wire [15:0]		read_addr_n;
 wire [9:0]		zero_pad_length;
 wire				stop_read;
@@ -84,15 +85,10 @@ assign total_length = (message_size * 8) + 1 + zero_pad_length + 64;
 //READ
 assign read_addr_n = ((count_t > 13) & (count_t < 78) | stop_read) ? read_addr : read_addr + 4;
 assign stop_read = (current_length == (message_size *8));
-
-//READ/WRITE
 assign port_A_addr = read_addr;
 assign port_A_clk = clk;
 assign word_read_n = changeEndian(port_A_data_out);
 assign done = (current_length-32 == total_length) && (state == IDLE);
-
-//WRITE
-assign port_A_we = wen;
 
 //COMPUTE:
 assign A = currMD[0];
@@ -100,6 +96,22 @@ assign B = currMD[1];
 assign C = currMD[2];
 assign D = currMD[3];
 assign E = currMD[4];
+
+assign A_n = T;
+assign B_n = A;
+assign C_n = (B << 30) | (B >> 2);
+assign D_n = C;
+assign E_n = D;
+
+assign A_plus = runMD[0] + A_n;
+assign B_plus = runMD[1] + B_n;
+assign C_plus = runMD[2] + C_n;
+assign D_plus = runMD[3] + D_n;
+assign E_plus = runMD[4] + E_n;
+
+assign BxCxD = B ^ C ^ D;
+assign BandC = B & C;
+
 assign W_t_next_no_shift = (W[count_t+1-3] ^ W[count_t+1-8] ^ W[count_t+1-14] ^ W[count_t+1-16]);
 
 //OUT
@@ -133,19 +145,19 @@ begin
 	//compute current K_t and F_b_c_d
 	if(count_t < 20) begin
 		K_t <= 32'h5a827999;
-		F_b_c_d <= (B & C) | ((~B) & D);
+		F_b_c_d <= BandC | ((~B) & D);
 	end
 	else if(count_t < 40) begin
 		K_t <= 32'h6ed9eba1;
-		F_b_c_d <= B ^ C ^ D;
+		F_b_c_d <= BxCxD;
 	end
 	else if(count_t < 60) begin
 		K_t <= 32'h8f1bbcdc;
-		F_b_c_d <= (B & C) | (B & D) | (C & D);
+		F_b_c_d <= BandC | (B & D) | (C & D);
 	end
 	else begin
 		K_t <= 32'hca62c1d6;
-		F_b_c_d <= B ^ C ^ D;
+		F_b_c_d <= BxCxD;
 	end
 	
 	//compute value of T
@@ -160,7 +172,6 @@ always@(posedge clk or negedge nreset)
 begin
 	if(!nreset) begin
 		//reset all registers
-		wen <= 1'b0;
 		state <=	IDLE;
 		current_length <= 32'b0;
 		count_t <= 7'b0;
@@ -192,9 +203,6 @@ begin
 					currMD[2] <= 32'h98badcfe;
 					currMD[3] <= 32'h10325476;
 					currMD[4] <= 32'hc3d2e1f0;
-				end
-				if(wen) begin
-					wen <= 1'b0;
 				end
 			end
 			
@@ -242,25 +250,25 @@ begin
 
 					if(count_t < 79) begin
 						//Perform Algorithm:
-						currMD[0] <= T;
-						currMD[1] <= A;
-						currMD[2] <= (B << 30) | (B >> 2);
-						currMD[3] <= C;
-						currMD[4] <= D;
+						currMD[0] <= A_n;
+						currMD[1] <= B_n;
+						currMD[2] <= C_n;
+						currMD[3] <= D_n;
+						currMD[4] <= E_n;
 					end
-					else if(count_t == 79) begin
+					else begin
 						state <= (current_length == total_length) ? IDLE : COMPUTE;
-						runMD[0] <= runMD[0] + T;
-						runMD[1] <= runMD[1] + A;
-						runMD[2] <= runMD[2] + ((B << 30) | (B >> 2));
-						runMD[3] <= runMD[3] + C;
-						runMD[4] <= runMD[4] + D;
+						runMD[0] <= A_plus;
+						runMD[1] <= B_plus;
+						runMD[2] <= C_plus;
+						runMD[3] <= D_plus;
+						runMD[4] <= E_plus;
 						
-						currMD[0] <= runMD[0] + T;
-						currMD[1] <= runMD[1] + A;
-						currMD[2] <= runMD[2] + ((B << 30) | (B >> 2));
-						currMD[3] <= runMD[3] + C;
-						currMD[4] <= runMD[4] + D;
+						currMD[0] <= A_plus;
+						currMD[1] <= B_plus;
+						currMD[2] <= C_plus;
+						currMD[3] <= D_plus;
+						currMD[4] <= E_plus;
 						current_length <= current_length + 32;
 						W[0] <= word_n;
 					end
