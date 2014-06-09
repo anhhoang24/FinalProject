@@ -188,6 +188,7 @@ begin
 		init_read <= 2'b0;
 	end
 	else begin
+		i <= 0;
 		case(state)
 			
 			IDLE: begin
