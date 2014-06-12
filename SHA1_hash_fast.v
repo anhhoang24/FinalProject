@@ -69,7 +69,7 @@ wire [31:0]		word_read_n, total_length, A, B, C, D, E, W_t_next_no_shift, curren
 wire [31:0]		A_n, B_n, C_n, D_n, E_n, A_plus, B_plus, C_plus, D_plus, E_plus, BxCxD, BandC;
 wire [15:0]		read_addr_n;
 wire [9:0]		zero_pad_length;
-wire [6:0]		count_t_n, count_t_n_mod;
+wire [6:0]		count_t_n, count_t_n_mod, current_W;
 wire				stop_read;
 
 
@@ -94,7 +94,7 @@ assign word_read_n = changeEndian(port_A_data_out);
 assign done = (current_length-32 == total_length) && (state == IDLE);
 assign current_length_n = current_length + 32;
 assign count_t_n = count_t + 1;
-assign count_t_n_mod = count_t_n % 16;
+assign current_W = (count_t < 16) ? count_t : 15;
 assign message_size_bit_s = message_size * 8;
 
 assign A = currMD[0];
@@ -118,7 +118,8 @@ assign E_plus = runMD[4] + E_n;
 assign BxCxD = B ^ C ^ D;
 assign BandC = B & C;
 
-assign W_t_next_no_shift = (W[(count_t-2) % 16] ^ W[(count_t-7) % 16] ^ W[(count_t-13) % 16] ^ W[(count_t-15) % 16]);
+//storage of data optimized
+assign W_t_next_no_shift = (W[13] ^ W[8] ^ W[2] ^ W[0]);
 
 //OUT
 assign hash = {runMD[0],runMD[1],runMD[2],runMD[3],runMD[4]};
@@ -167,7 +168,7 @@ begin
 	end
 	
 	//compute value of T
-	T <= ((A << 5) | (A >> 27)) + F_b_c_d + W[count_t % 16] + K_t + E;
+	T <= ((A << 5) | (A >> 27)) + F_b_c_d + W[current_W] + K_t + E;
 end
 
 
@@ -188,7 +189,6 @@ begin
 		init_read <= 2'b0;
 	end
 	else begin
-		i <= 0;
 		case(state)
 			
 			IDLE: begin
@@ -210,20 +210,28 @@ begin
 					currMD[2] <= 32'h98badcfe;
 					currMD[3] <= 32'h10325476;
 					currMD[4] <= 32'hc3d2e1f0;
+					i <= 0;
 				end
 			end
 			COMPUTE: begin
 				read_addr <= read_addr_n;
 				if(!init_read) begin
-					count_t <= (count_t_n) % 80; //increment count_t
+					count_t <= (count_t_n == 80) ? 0 : count_t_n; //increment count_t
 					//compute next W_t:
 					if(count_t_n < 16) begin
 						//reads:
-						W[count_t_n_mod] <= word_n;
+						W[count_t_n] <= word_n;
 						current_length <= current_length_n;
+						i <= 0;
 					end
 					else begin
-						W[count_t_n_mod] <= (W_t_next_no_shift << 1) | (W_t_next_no_shift >> 31);
+						W[15] <= (W_t_next_no_shift << 1) | (W_t_next_no_shift >> 31);
+						
+						//perform shift
+						for(i=15; i > 0; i = i-1) begin
+							W[i-1] <= W[i];
+						end
+						
 					end
 
 					if(count_t < 79) begin
